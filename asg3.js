@@ -1,7 +1,6 @@
 // Vertex shader program
 var VSHADER_SOURCE = `
   attribute vec4 a_Position;
-  attribute vec3 a_Normal;
   attribute vec4 a_VertexColor;
   attribute vec2 a_UV;
 
@@ -10,8 +9,6 @@ var VSHADER_SOURCE = `
   uniform mat4 u_ViewMatrix;
   uniform mat4 u_ProjMatrix;
 
-  varying vec3 vVertexPos;
-  varying vec3 vNormal;
   varying lowp vec4 vColor;
   varying vec2 vUv;
   varying vec2 selector;
@@ -20,8 +17,6 @@ var VSHADER_SOURCE = `
     gl_Position = u_ProjMatrix * u_ViewMatrix * u_ModelMatrix * a_Position;
     vColor = a_VertexColor;
     vUv = a_UV;
-    vNormal = normalize(a_Normal);
-    vVertexPos = vec3(u_ModelMatrix * a_Position);
     selector = u_selector;
   }
   `;
@@ -32,45 +27,15 @@ var FSHADER_SOURCE = `
 
   uniform sampler2D uTex0;
   uniform sampler2D uTex1;
-  uniform int normalVisualization;
-  uniform int lighting;
-  uniform int spotlight;
-  uniform vec3 u_CameraPos;
-  uniform vec3 u_CameraDir;
-  uniform vec3 u_LightPos;
-  uniform vec3 u_lightRGB;
 
-  varying vec3 vVertexPos;
-  varying vec3 vNormal;
   varying lowp vec4 vColor;
   varying vec2 vUv;
   varying vec2 selector;
 
   void main() {
-    if (normalVisualization == 0) {
-      if (lighting == 1) {
-        vec3 camVec = normalize(-u_CameraPos - vVertexPos);
-        vec3 lightVec = normalize(u_LightPos - vVertexPos);
-        vec4 image = texture2D(uTex0, vUv)*selector.x;
-        image += texture2D(uTex1, vUv)*selector.y;
-        float diffuse = max(0.0, dot(vNormal, lightVec)); // diffuse
-        float ambient = 0.2; //ambient
-        float specular = 1.5 * pow(max(0.0, dot(camVec, reflect(-lightVec, vNormal))), 10.0); //specular
-        float lighting = diffuse + ambient + specular;
-        if (spotlight == 1) {
-          float spot = pow(max(0.0, dot(-camVec, normalize(u_CameraDir))), 10.0) * 2.0;
-          lighting += spot * max(0.0, dot(vNormal, normalize(-u_CameraDir))); // diffuse
-          lighting += spot * 0.5 * pow(max(0.0, dot(camVec, reflect(normalize(u_CameraDir), vNormal))), 10.0); // specular
-        }
-        gl_FragColor = vec4(u_lightRGB * lighting * mix(vColor.rgb, image.rgb * image.a, 1.0-vColor.a), 1);
-      } else {
-        vec4 image = texture2D(uTex0, vUv)*selector.x;
-        image += texture2D(uTex1, vUv)*selector.y;
-        gl_FragColor = vec4(mix(vColor.rgb, image.rgb * image.a, 1.0-vColor.a), 1);
-      }
-    } else {
-      gl_FragColor = vec4(vNormal, 1.0); 
-    }
+    vec4 image = texture2D(uTex0, vUv)*selector.x;
+    image += texture2D(uTex1, vUv)*selector.y;
+    gl_FragColor = vec4(mix(vColor.rgb, image.rgb * image.a, 1.0-vColor.a), 1);
   }
   `;
 
@@ -124,18 +89,12 @@ let heightmap = [
 
 let canvas;
 let gl;
+let ext;
 let display;
 let frames;//frames since last fps update
 let lastFPSUpdate;//time of last FPS update
 
 let a_Position;
-let a_Normal;
-let u_LightPos;
-let u_lightRGB;
-let u_lighting;
-let u_spotlight;
-let u_CameraPos;
-let u_CameraDir;
 let u_ModelMatrix;
 let viewMatrix = new Matrix4();
 let u_ViewMatrix;
@@ -144,10 +103,6 @@ let u_ProjMatrix;
 let a_VertexColor;
 let a_UV;
 let u_selector;
-let normalVisualization;
-
-let lightPos = [5, 5, 10];
-let lightMove = true;
 
 let time;
 let objects = [];//list of RenderObjects
@@ -164,6 +119,11 @@ function setupWebGL(){
   gl = getWebGLContext(canvas);
   if (!gl) {
     console.log('Failed to get the rendering context for WebGL');
+    return 1;
+  }
+
+  ext = gl.getExtension('ANGLE_instanced_arrays');
+  if (!ext) {
     return 1;
   }
 
@@ -188,49 +148,6 @@ function connectVariablesToGLSL(){
     console.log('Failed to get the storage location of a_Position');
     return 1;
   }
-
-  a_Normal = gl.getAttribLocation(gl.program, 'a_Normal');
-  if (a_Normal < 0) {
-    console.log('Failed to get the storage location of a_Normal');
-    return 1;
-  }
-
-  u_LightPos = gl.getUniformLocation(gl.program, 'u_LightPos');
-  if (!u_LightPos) {
-    console.log('Failed to get the storage location of u_LightPos');
-    return 1;
-  }
-
-  u_lightRGB = gl.getUniformLocation(gl.program, 'u_lightRGB');
-  if (!u_lightRGB) {
-    console.log('Failed to get the storage location of u_lightRGB');
-    return 1;
-  }
-
-  u_lighting = gl.getUniformLocation(gl.program, 'lighting');
-  if (!u_lighting) {
-    console.log('Failed to get the storage location of u_lighting');
-    return 1;
-  }
-
-  u_spotlight = gl.getUniformLocation(gl.program, 'spotlight');
-  if (!u_spotlight) {
-    console.log('Failed to get the storage location of u_spotlight');
-    return 1;
-  }
-
-  u_CameraPos = gl.getUniformLocation(gl.program, 'u_CameraPos');
-  if (!u_CameraPos) {
-    console.log('Failed to get the storage location of u_CameraPos');
-    return 1;
-  }
-
-  u_CameraDir = gl.getUniformLocation(gl.program, 'u_CameraDir');
-  if (!u_CameraDir) {
-    console.log('Failed to get the storage location of u_CameraDir');
-    return 1;
-  }
-
 
   u_ModelMatrix = gl.getUniformLocation(gl.program, 'u_ModelMatrix');
   if (!u_ModelMatrix) {
@@ -265,12 +182,6 @@ function connectVariablesToGLSL(){
   u_selector = gl.getUniformLocation(gl.program, 'u_selector');
   if (u_selector < 0) {
     console.log('Failed to get the storage location of u_selector');
-    return 1;
-  }
-
-  normalVisualization = gl.getUniformLocation(gl.program, "normalVisualization");
-  if (normalVisualization < 0) {
-    console.warn("normalVisualization could not be found");
     return 1;
   }
 }
@@ -334,23 +245,14 @@ function clearCanvas (rgba=[0.8,0.8,1,1.0]) {
 }
 
 function addObjects (objects) {
-  let lightObject = new Cube(gl, [1, 1, 0, 1]);
-  lightObject.setTranslate(lightPos[0], lightPos[1], lightPos[2]);
-  objects.push(lightObject);
-
   let ground = new HeightMap(gl, heightmap);
   ground.setTranslate(-4, -2.5, -4);
   ground.setScale(4, 1, 4);
   objects.push(ground);
 
-  //let skybox = new Cube(gl, [.5, .6, 1, 1]);
-  //skybox.setScale(100, 100, 100);
-  //objects.push(skybox);
-
-  let sphere = new Sphere(gl, [.4, .5, .6, 1]);
-  sphere.setTranslate(8, 1, 8);
-  sphere.setScale(4, 4, 4);
-  objects.push(sphere);
+  let skybox = new Cube(gl, [.5, .6, 1, 1]);
+  skybox.setScale(100, 100, 100);
+  objects.push(skybox);
 
   for (let i = 0; i < walls.length; i++) {
     for (let j = 0; j < walls[i].length; j++) {
@@ -382,14 +284,10 @@ function camUpdate () {
   viewMatrix.rotate(camAngle[0], 0, 1, 0);
   viewMatrix.translate(camPos[0], camPos[2], camPos[1]);
   gl.uniformMatrix4fv(u_ViewMatrix, false, viewMatrix.elements);
-
-  gl.uniform3f(u_CameraPos, camPos[0], camPos[2], camPos[1]);
-  let angleChange = 135;
-  gl.uniform3f(u_CameraDir, Math.cos((camAngle[1]) * Math.PI/180) * (Math.sin(-(camAngle[0]-angleChange) * Math.PI/180) + Math.cos((camAngle[0]-angleChange) * Math.PI/180)), Math.sin((camAngle[1]-angleChange) * Math.PI/180) - Math.cos((camAngle[1]-angleChange) * Math.PI/180), Math.cos((camAngle[1]) * Math.PI/180) * (Math.cos((camAngle[0]-angleChange) * Math.PI/180) + Math.sin((camAngle[0]-angleChange) * Math.PI/180)));
 }
 
-function physicsUpdate(time, deltaTime) {
-  let camSpeed = 10;
+function physicsUpdate(deltaTime) {
+  let camSpeed = 5;
   if (camMovement[0] != 0 || camMovement[1] != 0 || camMovement[2] != 0 || camMovement[3] != 0 || camMovement[4] != 0 || camMovement[5] != 0 || camAngleChange[0] != 0 || camAngleChange[1] != 0) {
     camPos[0] += ((camMovement[0] - camMovement[2]) * Math.sin(-camAngle[0] * Math.PI/180) + (camMovement[1] - camMovement[3]) * Math.cos(camAngle[0] * Math.PI/180)) * camSpeed * deltaTime;
     camPos[1] += ((camMovement[0] - camMovement[2]) * Math.cos(camAngle[0] * Math.PI/180) + (camMovement[1] - camMovement[3]) * Math.sin(camAngle[0] * Math.PI/180)) * camSpeed * deltaTime;
@@ -397,13 +295,6 @@ function physicsUpdate(time, deltaTime) {
     camAngle[0] -= camAngleChange[0] * deltaTime * 25;
     camAngle[0] += camAngleChange[1] * deltaTime * 25;
     camUpdate();
-  }
-
-  if (lightMove) {
-    lightPos[0] = 5 + 10*Math.sin(time/1000);
-    lightPos[2] = 10 + 10*Math.cos(time/1000);
-    gl.uniform3f(u_LightPos, lightPos[0], lightPos[1], lightPos[2]);
-    objects[0].setTranslate(lightPos[0], lightPos[1], lightPos[2]);
   }
 }
 
@@ -418,7 +309,7 @@ function tick(newTime) {
   }
   if (deltaTime > 0 && deltaTime < 0.2) { // discard frame if dt is too large (could be from switching to another tab)
     animateObjects(deltaTime);
-    physicsUpdate(time, deltaTime);
+    physicsUpdate(deltaTime);
   }
   clearCanvas();
   RenderObject.renderObjects(gl, objects, u_ModelMatrix, u_selector);
@@ -430,8 +321,6 @@ function main() {
     return 1;
   }
   clearCanvas();
-
-  gl.uniform3f(u_LightPos, lightPos[0], lightPos[1], lightPos[2]);
 
   projMatrix.setPerspective(60, gl.canvas.clientWidth / gl.canvas.clientHeight, .1, 10000);
   gl.uniformMatrix4fv(u_ProjMatrix, false, projMatrix.elements);
@@ -476,7 +365,7 @@ function main() {
   canvas.addEventListener('mousemove', function(event) {
     if (lClick) {
       camAngle[0] += event.movementX;
-      camAngle[1] = Math.min(Math.max(camAngle[1] + event.movementY, -90), 90);
+      camAngle[1] += event.movementY;
       camUpdate();
     }
   });
@@ -502,9 +391,6 @@ function main() {
         camAngleChange[1] = 1;
         break;
       case ' ':
-        if (event.target == document.body) {
-          event.preventDefault();
-        }
         camMovement[5] = 1;
         break;
       case 'z':
@@ -539,59 +425,6 @@ function main() {
         camMovement[4] = 0;
     }
   });
-  let lightRGB = [1.0, 1.0, 1.0];
-  gl.uniform3f(u_lightRGB, lightRGB[0], lightRGB[1], lightRGB[2]);
-  document.getElementById('LightRed').oninput = function() {
-    lightRGB[0] = document.getElementById('LightRed').value / 100.0;
-    gl.uniform3f(u_lightRGB, lightRGB[0], lightRGB[1], lightRGB[2]);
-  };
-  document.getElementById('LightGreen').oninput = function() {
-    lightRGB[1] = document.getElementById('LightGreen').value / 100.0;
-    gl.uniform3f(u_lightRGB, lightRGB[0], lightRGB[1], lightRGB[2]);
-  };
-  document.getElementById('LightBlue').oninput = function() {
-    lightRGB[2] = document.getElementById('LightBlue').value / 100.0;
-    gl.uniform3f(u_lightRGB, lightRGB[0], lightRGB[1], lightRGB[2]);
-  };
-  let normalView = 0;
-  let button = document.getElementById("NormalVis");
-  button.onclick = function() {
-    normalView = normalView == 0 ? 1 : 0;
-    gl.uniform1i(normalVisualization, normalView);
-  };
-
-  let lighting = 1;
-  gl.uniform1i(u_lighting, lighting);
-  document.getElementById('LightingToggle').onclick = function () {
-    lighting = lighting == 1 ? 0 : 1;
-    gl.uniform1i(u_lighting, lighting);
-  };
-
-  let spotlight = 0;
-  gl.uniform1i(u_spotlight, spotlight);
-  document.getElementById('SpotlightToggle').onclick = function () {
-    spotlight = spotlight == 1 ? 0 : 1;
-    gl.uniform1i(u_spotlight, spotlight);
-  };
-
-  document.getElementById('LightMoveToggle').onclick = function () {
-    lightMove = lightMove == 1 ? 0 : 1;
-  };
-  document.getElementById('LightX').oninput = function() {
-    lightPos[0] = document.getElementById('LightX').value;
-    gl.uniform3f(u_LightPos, lightPos[0], lightPos[1], lightPos[2]);
-    objects[0].setTranslate(lightPos[0], lightPos[1], lightPos[2]);
-  };
-  document.getElementById('LightY').oninput = function() {
-    lightPos[1] = document.getElementById('LightY').value;
-    gl.uniform3f(u_LightPos, lightPos[0], lightPos[1], lightPos[2]);
-    objects[0].setTranslate(lightPos[0], lightPos[1], lightPos[2]);
-  };
-  document.getElementById('LightZ').oninput = function() {
-    lightPos[2] = document.getElementById('LightZ').value;
-    gl.uniform3f(u_LightPos, lightPos[0], lightPos[1], lightPos[2]);
-    objects[0].setTranslate(lightPos[0], lightPos[1], lightPos[2]);
-  };
 
   lastFPSUpdate = 0;
   frames = 0;
