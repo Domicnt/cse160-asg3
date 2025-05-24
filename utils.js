@@ -12,6 +12,7 @@ class RenderObject {
 
         this.vertexCount = 0;
         this.vertexBuffer = gl.createBuffer();
+        this.normalBuffer = gl.createBuffer();
         this.color = null;
         this.colorBuffer = gl.createBuffer();
         this.uvBuffer = gl.createBuffer();
@@ -61,6 +62,11 @@ class RenderObject {
             gl.bindBuffer(gl.ARRAY_BUFFER, object.vertexBuffer);
             gl.vertexAttribPointer(a_Position, 3, gl.FLOAT, false, 0, 0);
             gl.enableVertexAttribArray(a_Position);
+
+            //bind normal buffer
+            gl.bindBuffer(gl.ARRAY_BUFFER, object.normalBuffer);
+            gl.vertexAttribPointer(a_Normal, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(a_Normal);
       
             //bind uv buffer
             gl.bindBuffer(gl.ARRAY_BUFFER, object.uvBuffer);
@@ -92,6 +98,28 @@ class RenderObject {
     }
 }
 
+function calculateNormals(vertexCount, vertices) {
+    let normals = [];
+    //loop through all faces
+    for (let i = 0; i < vertexCount*3; i += 9) {
+        let vec1 = [vertices[i] - vertices[i+3], vertices[i+1] - vertices[i+4], vertices[i+2] - vertices[i+5]];
+        let vec2 = [vertices[i] - vertices[i+6], vertices[i+1] - vertices[i+7], vertices[i+2] - vertices[i+8]];
+
+        let cross = [vec1[1]*vec2[2] - vec1[2]*vec2[1], -(vec1[0]*vec2[2] - vec1[2]*vec2[0]), vec1[0]*vec2[1] - vec1[1]*vec2[0]];
+
+        let magnitude = Math.sqrt(cross[0]*cross[0] + cross[1]*cross[1] + cross[2]*cross[2]);
+        magnitude = magnitude == 0 ? 1 : magnitude;
+        let normal = [cross[0]/magnitude, cross[1]/magnitude, cross[2]/magnitude];
+
+        for (let j = 0; j < 3; j++) {
+            normals.push(normal[0]);
+            normals.push(normal[1]);
+            normals.push(normal[2]);
+        }
+    }
+    return normals;
+}
+
 class Cube extends RenderObject {
     constructor(gl, rgba=null, textureID=-1) {
         super();
@@ -120,6 +148,10 @@ class Cube extends RenderObject {
         ];
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+        let normals = calculateNormals(this.vertexCount, vertices);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
 
         if (rgba != null) {
             this.color = rgba;
@@ -169,7 +201,7 @@ class HeightMap extends RenderObject {
 
         let vertices = [];
         this.color = [.5,.45,.4,1];
-        let colorMod = .1
+        let colorMod = 0;
         let colors = [];
         for (let i = 0; i < heights.length-1; i++) {
             let row = []
@@ -192,32 +224,83 @@ class HeightMap extends RenderObject {
         }
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+        let normals = calculateNormals(this.vertexCount, vertices);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+
         gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
     }
 }
 
-class TrianglePrism extends RenderObject {
-    constructor(gl, rgba=[0.6,0.4,0.8,1.0]) {
+class Sphere extends RenderObject {
+    constructor(gl, rgba=null) {
         super();
-        this.type = "triPrism";
-        this.vertexCount = 24;
+        this.type = "sphere";
+        this.vertexCount = 0;
 
-        this.vertices = [
-            -1.0,-1.0,-1.0,  1.0,-1.0,-1.0,  -1.0,-1.0,1.0,  1.0,-1.0,1.0,
-            0.0,1.0,-1.0,  0.0,1.0,1.0
-        ];
+        let vertices = [];
 
-        this.colors = [];
-        for (var j = 0; j < 6*4; ++j) {
-            this.colors = this.colors.concat(rgba);
+        let r = .5;
+        let step = Math.PI/25;
+        for (let phi = 0; phi < Math.PI; phi += step) {
+            for (let theta = 0; theta < 2*Math.PI; theta += step) {
+                vertices.push(Math.sin(phi)*Math.cos(theta)*r); // x
+                vertices.push(Math.cos(phi)*r); // y
+                vertices.push(Math.sin(phi)*Math.sin(theta)*r); // z
+
+                vertices.push(Math.sin(phi+step)*Math.cos(theta+step)*r); // x
+                vertices.push(Math.cos(phi+step)*r); // y
+                vertices.push(Math.sin(phi+step)*Math.sin(theta+step)*r); // z
+
+                vertices.push(Math.sin(phi+step)*Math.cos(theta)*r); // x
+                vertices.push(Math.cos(phi+step)*r); // y
+                vertices.push(Math.sin(phi+step)*Math.sin(theta)*r); // z
+
+                if (phi != 0) {
+                    vertices.push(Math.sin(phi)*Math.cos(theta)*r); // x
+                    vertices.push(Math.cos(phi)*r); // y
+                    vertices.push(Math.sin(phi)*Math.sin(theta)*r); // z
+
+                    vertices.push(Math.sin(phi)*Math.cos(theta+step)*r); // x
+                    vertices.push(Math.cos(phi)*r); // y
+                    vertices.push(Math.sin(phi)*Math.sin(theta+step)*r); // z
+
+                    vertices.push(Math.sin(phi+step)*Math.cos(theta+step)*r); // x
+                    vertices.push(Math.cos(phi+step)*r); // y
+                    vertices.push(Math.sin(phi+step)*Math.sin(theta+step)*r); // z
+
+                    this.vertexCount += 3;
+                }
+
+                this.vertexCount += 3;
+            }
         }
 
-        //update buffers
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.vertices), gl.STATIC_DRAW);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.colors), gl.STATIC_DRAW);
+        let normals = calculateNormals(this.vertexCount, vertices);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+
+        if (rgba != null) {
+            this.color = rgba;
+            let colors = [];
+            for (var j = 0; j < this.vertexCount; ++j) {
+                colors = colors.concat(this.color);
+            }
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+        } else {
+            this.color = [0,0,0,0];
+            let colors = [];
+            for (var j = 0; j < this.vertexCount; ++j) {
+                colors = colors.concat(this.color);
+            }
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+        }
     }
 }
